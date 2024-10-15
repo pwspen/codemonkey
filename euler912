@@ -1,0 +1,96 @@
+import numpy as np
+import math
+
+chunksize_exp = 16 # 2 raised to this is chunksize
+start = 0
+
+def dist_from_pow2(pow, n):
+    pow2 = 2**pow
+    return (pow2 - (n % pow2))
+
+# print(dist_from_pow2(17, 60000))
+
+def gen_mask_chunk(pow): # 1 -> len8, 2 -> len16, ...
+    base = np.full(8, True)
+    base[-1] = False
+    for _ in range(pow - 1):
+        base = np.repeat(base, 2)
+    return base
+
+def gen_mask(start, chunkpow):
+    chunksz = 2**chunkpow
+    
+    larger_power_mask = np.full(chunksz, True)
+
+    #print(start)
+    max_pow = math.ceil(math.log2(start))
+    for testpow in range(chunkpow + 1, max_pow + 1):
+        keepoutsz = 2**(testpow-3)
+        dist = dist_from_pow2(testpow, start)
+
+        if dist >= chunksz and dist - keepoutsz <= 0:
+            #print(f'fully enveloped by 2**{testpow} keepout')
+            return None
+
+        if dist - keepoutsz > chunksz:
+            #print(f'2**{testpow} no overlap')
+            continue
+
+        if dist - keepoutsz > 0:
+            if dist > chunksz:
+                #print(f'2**{testpow} end overlap')
+                # Mask from (dist - keepoutsz) to end
+                larger_power_mask[(dist - keepoutsz):] = False
+            else:
+                #print(f'2**{testpow} mid overlap')
+                # Mask from (dist - keepoutsz) to dist
+                larger_power_mask[(dist - keepoutsz):dist] = False
+        else:
+            #print(f'2**{testpow} start overlap')
+            # Mask from start to dist
+            larger_power_mask[:dist] = False
+
+
+    mask = gen_mask_chunk(1)
+    for i in range(2, chunkpow-1):
+        mask = np.tile(mask, 2)
+        mask *= gen_mask_chunk(i)
+    mask = np.roll(mask, -start)
+    mask = mask * np.arange(start, start + 2**(chunkpow))
+    mask = mask[larger_power_mask == True]
+    return mask
+
+def gen_valids(start, chunkpow):
+    v = gen_mask(start=start, chunkpow=chunkpow)
+    if v is None:
+        return None
+    v = v[v != 0]
+    return v[::2]
+
+def cmod(n):
+    return n % (10**9 + 7)
+
+def sum_valids(start, chunkpow, sum, max):
+    vlist = gen_valids(start, chunkpow)
+    if vlist is None:
+        return None
+    vlist = vlist[vlist <= max]
+    return cmod(sum + cmod(np.sum(cmod(cmod(vlist)**2))))
+
+def iter_gen(below, chunkpow):
+    sum = 0
+    num_chunks = math.ceil(below / 2**chunkpow)
+    chunksz = 2**chunkpow
+
+    start = 1
+    for i in range(num_chunks):
+        newsum = sum_valids(start=start, chunkpow=chunkpow, sum=sum, max=below)
+        start = (i+1) * chunksz
+        if newsum is None:
+            continue
+        sum = newsum
+        if i % 100 == 0:
+            print(f'chunk {i+1}/{num_chunks} done ({(i+1)/(num_chunks) * 100:.2f}%), sum: {sum}, num: {i * chunksz}')
+    return sum
+
+print(iter_gen(10**16, 20))
